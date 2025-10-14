@@ -1,0 +1,72 @@
+name: Build wheels
+
+# We only want one release process running for each tag.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  DEPLOY_DIR: "deploy/pypi/zuban"
+  DEFAULT_ARCH: "aarch64"
+
+defaults:
+  run:
+    shell: bash
+    working-directory: "deploy/pypi/zuban"
+
+permissions:
+    id-token: write
+    contents: read
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        t:
+          - os: ubuntu-24.04
+            target: aarch64-unknown-linux-musl
+            maturin_docker_options: -e JEMALLOC_SYS_WITH_LG_PAGE=16
+            manylinux: musllinux_1_2
+            test: true
+
+    runs-on: ${{ matrix.t.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - if: ${{ matrix.t.test }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: ${{ matrix.t.arch || env.DEFAULT_ARCH }}
+      - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3
+        with:
+            # The target is needed, because there were issues when reusing
+            # caches, probably related to cross compiling.
+            key: "swatinem-${{ matrix.t.target }}"
+      - name: "Pre-Build"
+        run: ./pre-maturin-build.sh
+      - name: "Build Wheel"
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.t.target }}
+          working-directory: ${{ env.DEPLOY_DIR }}
+          docker-options: ${{ matrix.platform.maturin_docker_options }}
+          manylinux: ${{ matrix.t.manylinux }}
+          args: --release --locked --out dist --ignore-rust-version
+      - name: "Test wheel"
+        if: ${{ matrix.t.test }}
+        run: ./test-maturin-build.sh
+      - name: "Upload wheel as a GitHub Artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.t.os }}-${{ matrix.t.target }}
+          path: "${{ env.DEPLOY_DIR }}/dist"
