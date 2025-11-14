@@ -52,6 +52,7 @@ module-name = "zuban"
 python-source = "."
 locked = true
 exclude = [
+    "testfile.py"
 ]
 include = [
     "zuban/typeshed/LICENSE",
